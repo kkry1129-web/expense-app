@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>立替・経費精算</title>
+<!-- フェーズ1：ログイン確認用の最小画面。動作が確かめられたら、申請・一覧などの画面に置き換える -->
+<style>
+  body{margin:0;background:#f5f4ef;color:#1d1d1b;font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;font-size:15px;line-height:1.6}
+  .wrap{max-width:640px;margin:0 auto;padding:16px}
+  .card{background:#fff;border:1px solid #e2e0d6;border-radius:14px;padding:14px;margin-bottom:12px}
+  h1{font-size:19px;margin:4px 0 12px}
+  h2{font-size:15px;margin:0 0 6px}
+  code{background:#eee;padding:2px 6px;border-radius:6px;word-break:break-all}
+  .ok{color:#1d6a39}.ng{color:#a02a2a}.mute{color:#6a6961;font-size:13px}
+  button{padding:8px 14px;border-radius:10px;border:1px solid #1e5c47;background:#1e5c47;color:#fff;font:inherit;cursor:pointer}
+</style>
+<script src="config.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>立替・経費精算（ログイン確認）</h1>
+
+  <div class="card">
+    <h2>1. この画面の配信元</h2>
+    <div class="mute">下の値が、Google Cloud の OAuth クライアントの「承認済みの JavaScript 生成元」に登録されている必要があります。</div>
+    <p><code id="origin"></code></p>
+  </div>
+
+  <div class="card">
+    <h2>2. Google でログイン</h2>
+    <div id="cfg" class="ng"></div>
+    <div id="gbtn"></div>
+  </div>
+
+  <div class="card">
+    <h2>3. サーバーでの本人確認</h2>
+    <div id="result" class="mute">まだログインしていません。</div>
+    <p><button id="again" hidden>もう一度サーバーに確認する</button></p>
+  </div>
+</div>
+
+<script>
+  var CFG = window.APP_CONFIG || {};
+  var idToken = null;
+
+  // 配信元（JavaScript 生成元に登録する値）を表示する
+  document.getElementById('origin').textContent = location.origin;
+
+  /**
+   * Apps Script の窓口を呼ぶ。通信部分はここだけにまとめる。
+   * Content-Type を text/plain にするのは、ブラウザの事前確認（プリフライト）を起こさないため。
+   * （Apps Script は事前確認に応答できない）
+   */
+  function callApi(action, payload) {
+    return fetch(CFG.API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ idToken: idToken, action: action, payload: payload || {} })
+    }).then(function (res) {
+      if (!res.ok) throw new Error('サーバーの応答が異常です（' + res.status + '）');
+      return res.json();
+    });
+  }
+
+  /** サーバーに「自分は誰か」を問い合わせて表示する */
+  function check() {
+    var el = document.getElementById('result');
+    el.className = 'mute';
+    el.textContent = '確認中…';
+    callApi('whoami').then(function (r) {
+      if (r.ok) {
+        el.className = 'ok';
+        el.textContent = '確認できました：' + r.data.name + '（' + r.data.email + '）／役割：' + r.data.role;
+      } else {
+        el.className = 'ng';
+        el.textContent = r.error;
+      }
+      document.getElementById('again').hidden = false;
+    }).catch(function (e) {
+      el.className = 'ng';
+      el.textContent = '通信エラー：' + (e && e.message || e);
+      document.getElementById('again').hidden = false;
+    });
+  }
+  document.getElementById('again').addEventListener('click', check);
+
+  /** GIS のログインが済んだときに呼ばれる */
+  function onCredential(resp) {
+    idToken = resp.credential;
+    check();
+  }
+
+  /** GIS の読み込みが終わったら、ログインボタンを表示する */
+  window.onGisLoad = function () {
+    if (!CFG.CLIENT_ID || !CFG.API_URL) {
+      document.getElementById('cfg').textContent = 'config.js の CLIENT_ID または API_URL が未設定です。';
+      return;
+    }
+    google.accounts.id.initialize({ client_id: CFG.CLIENT_ID, callback: onCredential });
+    google.accounts.id.renderButton(document.getElementById('gbtn'), { theme: 'outline', size: 'large', text: 'signin_with', locale: 'ja' });
+  };
+</script>
+<script src="https://accounts.google.com/gsi/client" async defer onload="onGisLoad()"></script>
+</body>
+</html>
