@@ -2,105 +2,196 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>立替・経費精算</title>
-<!-- フェーズ1：ログイン確認用の最小画面。動作が確かめられたら、申請・一覧などの画面に置き換える -->
+<!--
+  画面（GitHub Pages に置く）。データの読み書きはすべて Apps Script の窓口（config.js の API_URL）を通す。
+  見た目は旧版 expense-app.html を引き継ぐ。動きは app.js に書く。
+  ※ このファイルは公開される。氏名・メールアドレスなどは書かない（サーバーから受け取って表示する）。
+-->
 <style>
-  body{margin:0;background:#f5f4ef;color:#1d1d1b;font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;font-size:15px;line-height:1.6}
-  .wrap{max-width:640px;margin:0 auto;padding:16px}
-  .card{background:#fff;border:1px solid #e2e0d6;border-radius:14px;padding:14px;margin-bottom:12px}
-  h1{font-size:19px;margin:4px 0 12px}
-  h2{font-size:15px;margin:0 0 6px}
-  code{background:#eee;padding:2px 6px;border-radius:6px;word-break:break-all}
-  .ok{color:#1d6a39}.ng{color:#a02a2a}.mute{color:#6a6961;font-size:13px}
-  button{padding:8px 14px;border-radius:10px;border:1px solid #1e5c47;background:#1e5c47;color:#fff;font:inherit;cursor:pointer}
+/* 色の定義（明るい表示／暗い表示）。旧版と同じ */
+:root{--bg:#f5f4ef;--card:#ffffff;--ink:#1d1d1b;--mute:#6a6961;--line:#e2e0d6;--acc:#1e5c47;--btnink:#ffffff;--acc2:#e6f0eb;--warn:#a34a0c;--warn2:#fbeee2;--bad:#a02a2a;--bad2:#f9e6e6;--ok:#1d6a39;--ok2:#e3f2e8;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161715;--card:#20211f;--ink:#ecebe5;--mute:#a09f96;--line:#33342f;--acc:#6fc4a3;--btnink:#10201a;--acc2:#1e2d27;--warn:#f0a066;--warn2:#33261b;--bad:#f08a8a;--bad2:#341f1f;--ok:#7fd49a;--ok2:#1c2d22}}
+:root[data-theme="dark"]{--bg:#161715;--card:#20211f;--ink:#ecebe5;--mute:#a09f96;--line:#33342f;--acc:#6fc4a3;--btnink:#10201a;--acc2:#1e2d27;--warn:#f0a066;--warn2:#33261b;--bad:#f08a8a;--bad2:#341f1f;--ok:#7fd49a;--ok2:#1c2d22}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic",system-ui,sans-serif;font-size:15px;line-height:1.55}
+.wrap{max-width:720px;margin:0 auto;padding:12px 12px 48px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 2px 10px;flex-wrap:wrap}
+.ttl{font-size:19px;font-weight:700}
+.mute{color:var(--mute);font-size:13px}
+.link{background:none;border:none;color:var(--acc);font:inherit;font-size:13px;cursor:pointer;padding:4px 6px}
+nav{display:flex;gap:6px;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding:6px 0 8px;z-index:5;border-bottom:1px solid var(--line);margin-bottom:12px}
+nav button{flex:1;padding:9px 4px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;font:inherit;font-size:14px;cursor:pointer}
+nav button.on{background:var(--acc);color:var(--btnink);border-color:var(--acc);font-weight:700}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card.dim{opacity:.55}
+label{display:block;font-size:13px;color:var(--mute);margin:12px 0 4px}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
+textarea{min-height:76px;resize:vertical}
+.chk{display:flex;gap:8px;align-items:flex-start;margin-top:10px;font-size:14px}
+.chk input{width:auto;margin-top:4px}
+.chk label{margin:0;color:inherit;font-size:14px}
+.btn{padding:10px 16px;border-radius:10px;border:1px solid var(--acc);background:var(--acc);color:var(--btnink);font:inherit;font-weight:700;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--acc)}
+.btn.bad{border-color:var(--bad);color:var(--bad);background:transparent}
+.btn:disabled{opacity:.45;cursor:default}
+/* 保存中は操作ボタンを押せないようにする（二重送信の防止） */
+body.busy button[data-act],body.busy #btnSubmit{opacity:.45;pointer-events:none}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+.row>input,.row>select{flex:1;min-width:120px}
+.note{font-size:13px;padding:8px 10px;border-radius:10px;margin-top:10px}
+.note.w{background:var(--warn2);color:var(--warn)}
+.note.b{background:var(--bad2);color:var(--bad)}
+.note.o{background:var(--ok2);color:var(--ok)}
+.note.i{background:var(--acc2);color:var(--acc)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.chip{padding:6px 12px;border-radius:99px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
+.chip.on{background:var(--acc2);border-color:var(--acc);color:var(--acc);font-weight:700}
+.h{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.no{font-size:12px;color:var(--mute)}
+.amt{font-size:18px;font-weight:700;white-space:nowrap}
+.pay{font-weight:700;word-break:break-all}
+.memo{margin-top:6px;white-space:pre-wrap;word-break:break-all}
+.meta{font-size:13px;color:var(--mute);margin-top:2px}
+.badge{display:inline-block;font-size:12px;padding:2px 9px;border-radius:99px;font-weight:700}
+.b-p{background:var(--warn2);color:var(--warn)}.b-a{background:var(--acc2);color:var(--acc)}.b-ok{background:var(--ok2);color:var(--ok)}.b-bad{background:var(--bad2);color:var(--bad)}.b-m{background:var(--line);color:var(--mute)}
+.flag{display:inline-block;font-size:12px;color:var(--warn);margin-right:8px}
+.empty{text-align:center;color:var(--mute);padding:28px 0}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--mute);font-weight:600;white-space:nowrap}
+td.r,th.r{text-align:right;white-space:nowrap}
+.scroll{overflow-x:auto}
+.bar{height:12px;border-radius:99px;background:var(--line);overflow:hidden;display:flex;margin:8px 0 4px}
+.bar i{display:block;height:100%}
+h3{margin:0 0 6px;font-size:16px}
+details summary{cursor:pointer;color:var(--acc);font-size:14px}
+[hidden]{display:none!important}
 </style>
-<script src="config.js"></script>
+<!-- 設定（CLIENT_ID・API_URL）→ 画面の処理 → Googleログイン の順に読み込む -->
+<script src="config.js?v=3"></script>
+<script src="app.js?v=3"></script>
 </head>
 <body>
 <div class="wrap">
-  <h1>立替・経費精算（ログイン確認）</h1>
-
-  <div class="card">
-    <h2>1. この画面の配信元</h2>
-    <div class="mute">下の値が、Google Cloud の OAuth クライアントの「承認済みの JavaScript 生成元」に登録されている必要があります。</div>
-    <p><code id="origin"></code></p>
+  <div class="top">
+    <div class="ttl">立替・経費精算</div>
+    <div>
+      <span class="mute" id="who"></span>
+      <button class="link" id="btnReload" hidden>更新</button>
+      <button class="link" id="btnLogout" hidden>ログアウト</button>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>2. Google でログイン</h2>
-    <div id="cfg" class="ng"></div>
-    <div id="gbtn"></div>
+  <!-- ログイン（最初と、ログインの有効期限が切れたときに表示する） -->
+  <div class="card" id="login">
+    <h3>Google でログイン</h3>
+    <div class="mute">メンバーに登録された Google アカウントでログインしてください。</div>
+    <div id="loginMsg"></div>
+    <div id="gbtn" style="margin-top:12px"></div>
   </div>
 
-  <div class="card">
-    <h2>3. サーバーでの本人確認</h2>
-    <div id="result" class="mute">まだログインしていません。</div>
-    <p><button id="again" hidden>もう一度サーバーに確認する</button></p>
+  <div id="banner"></div>
+
+  <div id="app" hidden>
+    <nav id="tabs">
+      <button data-t="new" class="on">申請</button>
+      <button data-t="list">一覧</button>
+      <button data-t="settle">精算</button>
+      <button data-t="doc">帳票</button>
+    </nav>
+
+    <!-- 申請タブ -->
+    <section id="v-new">
+      <div class="card">
+        <h3 id="formTitle">立替の申請</h3>
+        <div class="mute">申請者：<span id="f_who"></span>（ログインした人で決まります）</div>
+        <label for="f_date">領収書の日付</label>
+        <input id="f_date" type="date">
+        <label for="f_payee">支払先</label>
+        <input id="f_payee" type="text" maxlength="100" placeholder="例：印章店、法務局">
+        <label for="f_amt">金額（税込・円）</label>
+        <input id="f_amt" type="text" inputmode="numeric" placeholder="例：12000">
+        <label for="f_cat">区分</label>
+        <select id="f_cat"></select>
+        <label for="f_memo">内容（何のための支出か具体的に）</label>
+        <textarea id="f_memo" maxlength="1000" placeholder="例：会社実印・銀行印・角印の3本セット購入"></textarea>
+        <div id="memoHint"></div>
+        <label for="f_pay">支払方法</label>
+        <select id="f_pay"></select>
+        <label for="f_rc">領収書</label>
+        <select id="f_rc">
+          <option value="paper">原本を保管している</option>
+          <option value="digital">電子データ（メール・PDF）を保存している</option>
+          <option value="none">なし（理由を内容欄に書く）</option>
+        </select>
+        <div id="wPre" hidden class="chk"><input type="checkbox" id="f_pre"><label for="f_pre">5万円以上のため、支出前に代表の承認を得ている</label></div>
+        <div id="wQuote" hidden class="chk"><input type="checkbox" id="f_quote"><label for="f_quote">50万円超のため、相見積を2社以上取っている</label></div>
+        <div class="row">
+          <button class="btn" id="btnSubmit">申請する</button>
+          <button class="btn ghost" id="btnCancelEdit" hidden>修正をやめる</button>
+        </div>
+        <div id="formMsg"></div>
+      </div>
+      <details class="card">
+        <summary>経費のルール（社内規程案より）</summary>
+        <div class="mute" style="margin-top:8px">
+          1万円未満：事後報告でよい<br>
+          1万円以上5万円未満：支出前に代表へ連絡<br>
+          5万円以上：支出前に代表の承認<br>
+          50万円超：相見積2社以上<br>
+          飲食：打合せの記録（いつ・誰と・何の打合せか）があれば会議費にできます。創業メンバーだけで、打合せの記録がない飲食は経費にしません<br>
+          領収書は原本を保管し、電子で受け取ったものは電子のまま保存します<br>
+          設立前の支出のうち、定款認証手数料・登録免許税・法人印・専門家報酬は創立費、設立後から営業開始までは開業費です
+        </div>
+      </details>
+    </section>
+
+    <!-- 一覧タブ -->
+    <section id="v-list" hidden>
+      <div class="chips" id="chips">
+        <button class="chip on" data-f="all">すべて</button>
+        <button class="chip" data-f="pending">申請中</button>
+        <button class="chip" data-f="approved">承認済</button>
+        <button class="chip" data-f="paid">支払済</button>
+        <button class="chip" data-f="rejected">差戻し</button>
+        <button class="chip" data-f="withdrawn">取下げ</button>
+      </div>
+      <select id="l_app" style="margin-bottom:10px"></select>
+      <div id="list"></div>
+    </section>
+
+    <!-- 精算タブ -->
+    <section id="v-settle" hidden>
+      <div id="settle"></div>
+    </section>
+
+    <!-- 帳票タブ -->
+    <section id="v-doc" hidden>
+      <div class="card">
+        <h3>帳票の出力</h3>
+        <div class="mute">税務上の証拠は「領収書の原本（または電子データ）」「この精算書」「振込明細」の3点セットで保管します。</div>
+        <label for="d_app">申請者</label>
+        <select id="d_app"></select>
+        <label for="d_st">対象の状態</label>
+        <select id="d_st"><option value="both">承認済・支払済</option><option value="paid">支払済のみ</option></select>
+        <div class="row">
+          <div style="flex:1;min-width:130px"><label for="d_from" style="margin-top:0">領収書日付（から）</label><input id="d_from" type="date"></div>
+          <div style="flex:1;min-width:130px"><label for="d_to" style="margin-top:0">領収書日付（まで）</label><input id="d_to" type="date"></div>
+        </div>
+        <div class="row">
+          <button class="btn" id="btnHtml">精算書を保存（印刷用）</button>
+          <button class="btn ghost" id="btnCsv">全件の台帳をCSVで保存</button>
+        </div>
+        <div id="docMsg"></div>
+      </div>
+      <div class="card"><div class="scroll" id="docPrev"></div></div>
+    </section>
   </div>
 </div>
-
-<script>
-  var CFG = window.APP_CONFIG || {};
-  var idToken = null;
-
-  // 配信元（JavaScript 生成元に登録する値）を表示する
-  document.getElementById('origin').textContent = location.origin;
-
-  /**
-   * Apps Script の窓口を呼ぶ。通信部分はここだけにまとめる。
-   * Content-Type を text/plain にするのは、ブラウザの事前確認（プリフライト）を起こさないため。
-   * （Apps Script は事前確認に応答できない）
-   */
-  function callApi(action, payload) {
-    return fetch(CFG.API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ idToken: idToken, action: action, payload: payload || {} })
-    }).then(function (res) {
-      if (!res.ok) throw new Error('サーバーの応答が異常です（' + res.status + '）');
-      return res.json();
-    });
-  }
-
-  /** サーバーに「自分は誰か」を問い合わせて表示する */
-  function check() {
-    var el = document.getElementById('result');
-    el.className = 'mute';
-    el.textContent = '確認中…';
-    callApi('whoami').then(function (r) {
-      if (r.ok) {
-        el.className = 'ok';
-        el.textContent = '確認できました：' + r.data.name + '（' + r.data.email + '）／役割：' + r.data.role;
-      } else {
-        el.className = 'ng';
-        el.textContent = r.error;
-      }
-      document.getElementById('again').hidden = false;
-    }).catch(function (e) {
-      el.className = 'ng';
-      el.textContent = '通信エラー：' + (e && e.message || e);
-      document.getElementById('again').hidden = false;
-    });
-  }
-  document.getElementById('again').addEventListener('click', check);
-
-  /** GIS のログインが済んだときに呼ばれる */
-  function onCredential(resp) {
-    idToken = resp.credential;
-    check();
-  }
-
-  /** GIS の読み込みが終わったら、ログインボタンを表示する */
-  window.onGisLoad = function () {
-    if (!CFG.CLIENT_ID || !CFG.API_URL) {
-      document.getElementById('cfg').textContent = 'config.js の CLIENT_ID または API_URL が未設定です。';
-      return;
-    }
-    google.accounts.id.initialize({ client_id: CFG.CLIENT_ID, callback: onCredential });
-    google.accounts.id.renderButton(document.getElementById('gbtn'), { theme: 'outline', size: 'large', text: 'signin_with', locale: 'ja' });
-  };
-</script>
+<!-- Google ログイン（GIS）。読み込みが終わったら app.js の onGisLoad を呼ぶ -->
 <script src="https://accounts.google.com/gsi/client" async defer onload="onGisLoad()"></script>
 </body>
 </html>
