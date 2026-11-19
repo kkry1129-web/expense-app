@@ -58,6 +58,8 @@ body.busy button[data-act],body.busy #btnSubmit{opacity:.45;pointer-events:none}
 .badge{display:inline-block;font-size:12px;padding:2px 9px;border-radius:99px;font-weight:700}
 .b-p{background:var(--warn2);color:var(--warn)}.b-a{background:var(--acc2);color:var(--acc)}.b-ok{background:var(--ok2);color:var(--ok)}.b-bad{background:var(--bad2);color:var(--bad)}.b-m{background:var(--line);color:var(--mute)}
 .flag{display:inline-block;font-size:12px;color:var(--warn);margin-right:8px}
+.fbtn{background:none;border:1px solid var(--line);border-radius:8px;color:var(--acc);font:inherit;font-size:13px;padding:3px 8px;margin:6px 6px 0 0;cursor:pointer}
+.tag{display:inline-block;font-size:12px;padding:1px 7px;border-radius:6px;background:var(--acc2);color:var(--acc);margin-right:6px}
 .empty{text-align:center;color:var(--mute);padding:28px 0}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
@@ -71,8 +73,8 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
 [hidden]{display:none!important}
 </style>
 <!-- 設定（CLIENT_ID・API_URL）→ 画面の処理 → Googleログイン の順に読み込む -->
-<script src="config.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="config.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </head>
 <body>
 <div class="wrap">
@@ -107,16 +109,67 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
     <section id="v-new">
       <div class="card">
         <h3 id="formTitle">立替の申請</h3>
-        <div class="mute">申請者：<span id="f_who"></span>（ログインした人で決まります）</div>
-        <label for="f_date">領収書の日付</label>
-        <input id="f_date" type="date">
-        <label for="f_payee">支払先</label>
-        <input id="f_payee" type="text" maxlength="100" placeholder="例：印章店、法務局">
-        <label for="f_amt">金額（税込・円）</label>
-        <input id="f_amt" type="text" inputmode="numeric" placeholder="例：12000">
+        <!-- 代理入力（承認者だけに出す。規程6条2項：アプリを使えない人の分は代表が入力する） -->
+        <div id="proxyBox" hidden>
+          <div class="chk"><input type="checkbox" id="f_proxy"><label for="f_proxy">代理入力（アプリを使えない人の分を入力する）</label></div>
+          <div id="proxyWho" hidden>
+            <label for="f_applicant">申請者</label>
+            <select id="f_applicant"></select>
+          </div>
+        </div>
+        <div class="mute" id="whoLine">申請者：<span id="f_who"></span>（ログインした人で決まります）</div>
+
+        <label for="f_kind">申請の種類</label>
+        <select id="f_kind">
+          <option value="normal">通常の経費</option>
+          <option value="trip">出張・研修</option>
+        </select>
+
+        <!-- 出張・研修の欄（規程5条） -->
+        <div id="tripBox" hidden>
+          <label for="f_dest">行き先</label>
+          <input id="f_dest" type="text" maxlength="100" placeholder="例：〇〇市 研修センター">
+          <label for="f_purpose">目的</label>
+          <input id="f_purpose" type="text" maxlength="200" placeholder="例：介護保険制度の研修を受講">
+          <div class="row">
+            <div style="flex:1;min-width:130px"><label for="f_from" style="margin-top:0">日程（開始日）</label><input id="f_from" type="date"></div>
+            <div style="flex:1;min-width:130px"><label for="f_to" style="margin-top:0">日程（終了日）</label><input id="f_to" type="date"></div>
+          </div>
+          <div class="chk"><input type="checkbox" id="f_stay"><label for="f_stay">宿泊あり</label></div>
+          <div id="stayBox" hidden class="row">
+            <div style="flex:1;min-width:110px"><label for="f_nights" style="margin-top:0">泊数</label><input id="f_nights" type="text" inputmode="numeric" placeholder="例：1"></div>
+            <div style="flex:2;min-width:150px"><label for="f_hotel" style="margin-top:0">宿泊費（合計・税込・円）</label><input id="f_hotel" type="text" inputmode="numeric" placeholder="例：11000"></div>
+          </div>
+          <div id="stayHint"></div>
+        </div>
+
+        <!-- 通常の経費の欄 -->
+        <div id="normalBox">
+          <label for="f_date">領収書の日付</label>
+          <input id="f_date" type="date">
+          <label for="f_payee">支払先</label>
+          <input id="f_payee" type="text" maxlength="100" placeholder="例：印章店、法務局">
+          <div id="relatedHint"></div>
+          <div class="chk" id="carBox"><input type="checkbox" id="f_car"><label for="f_car">自家用車（走行距離で計算する）</label></div>
+        </div>
+
+        <!-- 走行距離と実費（出張・研修、または自家用車のとき）。金額はサーバーで計算する -->
+        <div id="calcBox" hidden>
+          <div class="row">
+            <div style="flex:1;min-width:120px"><label for="f_km" style="margin-top:0">走行距離（km・自家用車）</label><input id="f_km" type="text" inputmode="numeric" placeholder="例：120"></div>
+            <div style="flex:1;min-width:150px"><label for="f_other" style="margin-top:0" id="otherLabel">その他の実費（円）</label><input id="f_other" type="text" inputmode="numeric" placeholder="例：1500"></div>
+          </div>
+          <div class="mute" id="otherNote" style="margin-top:4px"></div>
+          <div class="note i" id="calcSum"></div>
+        </div>
+
+        <div id="amtBox">
+          <label for="f_amt">金額（税込・円）</label>
+          <input id="f_amt" type="text" inputmode="numeric" placeholder="例：12000">
+        </div>
         <label for="f_cat">区分</label>
         <select id="f_cat"></select>
-        <label for="f_memo">内容（何のための支出か具体的に）</label>
+        <label for="f_memo" id="memoLabel">内容（何のための支出か具体的に）</label>
         <textarea id="f_memo" maxlength="1000" placeholder="例：会社実印・銀行印・角印の3本セット購入"></textarea>
         <div id="memoHint"></div>
         <label for="f_pay">支払方法</label>
@@ -125,10 +178,22 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
         <select id="f_rc">
           <option value="paper">原本を保管している</option>
           <option value="digital">電子データ（メール・PDF）を保存している</option>
-          <option value="none">なし（理由を内容欄に書く）</option>
+          <option value="none">なし（理由・経路を内容欄に書く）</option>
         </select>
-        <div id="wPre" hidden class="chk"><input type="checkbox" id="f_pre"><label for="f_pre">5万円以上のため、支出前に代表の承認を得ている</label></div>
+        <div id="wNotice" hidden class="chk"><input type="checkbox" id="f_notice"><label for="f_notice">1万円以上のため、支出前に代表へ連絡した</label></div>
+        <div id="wPre" hidden class="chk"><input type="checkbox" id="f_pre"><label for="f_pre" id="preLabel">支出前に代表の承認を得ている</label></div>
         <div id="wQuote" hidden class="chk"><input type="checkbox" id="f_quote"><label for="f_quote">50万円超のため、相見積を2社以上取っている</label></div>
+        <div class="chk"><input type="checkbox" id="f_related"><label for="f_related">役員・関係法人など、関係者との取引</label></div>
+        <div id="checkHint"></div>
+
+        <!-- 添付（事前連絡のチャット画面・領収書の写真）。画像は縮めてから送る -->
+        <label for="f_file">添付（事前連絡のチャット画面・領収書の写真。任意）</label>
+        <div class="row" style="margin-top:0">
+          <select id="f_fkind" style="flex:0 0 auto;width:auto"><option value="chat">事前連絡</option><option value="receipt">領収書</option></select>
+          <input id="f_file" type="file" accept="image/*,application/pdf">
+        </div>
+        <div id="fileList"></div>
+        <div id="fileMsg"></div>
         <div class="row">
           <button class="btn" id="btnSubmit">申請する</button>
           <button class="btn ghost" id="btnCancelEdit" hidden>修正をやめる</button>
@@ -136,12 +201,18 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
         <div id="formMsg"></div>
       </div>
       <details class="card">
-        <summary>経費のルール（社内規程案より）</summary>
+        <summary>経費のルール（経費・旅費規程案より）</summary>
         <div class="mute" style="margin-top:8px">
           1万円未満：事後報告でよい<br>
           1万円以上5万円未満：支出前に代表へ連絡<br>
           5万円以上：支出前に代表の承認<br>
           50万円超：相見積2社以上<br>
+          代表自身の5万円以上の支出と、役員・関係法人など関係者との取引は、ほかの取締役1名も確認します<br>
+          旅費は実費で精算し、日当はありません。鉄道・バス・航空機は最も経済的な経路（新幹線・特急は指定席まで）<br>
+          自家用車は走行距離×設定の単価（高速代・駐車場代は実費）。宿泊は1泊の上限まで（超えるときは事前に代表の承認）<br>
+          宿泊を伴う出張は、事前に代表の承認が必要です<br>
+          申請は翌月10日まで、振込は翌月15日です<br>
+          アプリを使えない人は、チャットで事前連絡と領収書の写真を送り、代表が代わりに入力します（原本は月末に手渡し）<br>
           飲食：打合せの記録（いつ・誰と・何の打合せか）があれば会議費にできます。創業メンバーだけで、打合せの記録がない飲食は経費にしません<br>
           領収書は原本を保管し、電子で受け取ったものは電子のまま保存します<br>
           設立前の支出のうち、定款認証手数料・登録免許税・法人印・専門家報酬は創立費、設立後から営業開始までは開業費です
@@ -158,6 +229,8 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
         <button class="chip" data-f="paid">支払済</button>
         <button class="chip" data-f="rejected">差戻し</button>
         <button class="chip" data-f="withdrawn">取下げ</button>
+        <button class="chip" data-f="check">確認待ち</button>
+        <button class="chip" data-f="orig">原本未受領</button>
       </div>
       <select id="l_app" style="margin-bottom:10px"></select>
       <div id="list"></div>
