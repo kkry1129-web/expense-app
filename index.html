@@ -74,7 +74,7 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
 </style>
 <!-- 設定（CLIENT_ID・API_URL）→ 画面の処理 → Googleログイン の順に読み込む -->
 <script src="config.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </head>
 <body>
 <div class="wrap">
@@ -119,6 +119,14 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
         </div>
         <div class="mute" id="whoLine">申請者：<span id="f_who"></span>（ログインした人で決まります）</div>
 
+        <!-- 申請の段階（2026-11-24）。事前申請は、支出の前に代表の事前承認を受けるためのもの -->
+        <label for="f_mode">申請の段階</label>
+        <select id="f_mode">
+          <option value="settle">精算申請（支出のあと）</option>
+          <option value="plan">事前申請（支出の前に承認を受ける）</option>
+        </select>
+        <div id="planNote" class="note i" hidden>事前申請では、見込みの金額と予定を入れてください。代表の事前承認のあと、支出が済んだら一覧の「精算する」から実際の金額で申請します。</div>
+
         <label for="f_kind">申請の種類</label>
         <select id="f_kind">
           <option value="normal">通常の経費</option>
@@ -145,7 +153,7 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
 
         <!-- 通常の経費の欄 -->
         <div id="normalBox">
-          <label for="f_date">領収書の日付</label>
+          <label for="f_date" id="dateLabel">領収書の日付</label>
           <input id="f_date" type="date">
           <label for="f_payee">支払先</label>
           <input id="f_payee" type="text" maxlength="100" placeholder="例：印章店、法務局">
@@ -164,7 +172,7 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
         </div>
 
         <div id="amtBox">
-          <label for="f_amt">金額（税込・円）</label>
+          <label for="f_amt" id="amtLabel">金額（税込・円）</label>
           <input id="f_amt" type="text" inputmode="numeric" placeholder="例：12000">
         </div>
         <label for="f_cat">区分</label>
@@ -172,14 +180,17 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
         <label for="f_memo" id="memoLabel">内容（何のための支出か具体的に）</label>
         <textarea id="f_memo" maxlength="1000" placeholder="例：会社実印・銀行印・角印の3本セット購入"></textarea>
         <div id="memoHint"></div>
-        <label for="f_pay">支払方法</label>
-        <select id="f_pay"></select>
-        <label for="f_rc">領収書</label>
-        <select id="f_rc">
-          <option value="paper">原本を保管している</option>
-          <option value="digital">電子データ（メール・PDF）を保存している</option>
-          <option value="none">なし（理由・経路を内容欄に書く）</option>
-        </select>
+        <!-- 支払方法と領収書（事前申請では隠す） -->
+        <div id="payBox">
+          <label for="f_pay">支払方法</label>
+          <select id="f_pay"></select>
+          <label for="f_rc">領収書</label>
+          <select id="f_rc">
+            <option value="paper">原本を保管している</option>
+            <option value="digital">電子データ（メール・PDF）を保存している</option>
+            <option value="none">なし（理由・経路を内容欄に書く）</option>
+          </select>
+        </div>
         <div id="wNotice" hidden class="chk"><input type="checkbox" id="f_notice"><label for="f_notice">1万円以上のため、支出前に代表へ連絡した</label></div>
         <div id="wPre" hidden class="chk"><input type="checkbox" id="f_pre"><label for="f_pre" id="preLabel">支出前に代表の承認を得ている</label></div>
         <div id="wQuote" hidden class="chk"><input type="checkbox" id="f_quote"><label for="f_quote">50万円超のため、相見積を2社以上取っている</label></div>
@@ -211,6 +222,7 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
           旅費は実費で精算し、日当はありません。鉄道・バス・航空機は最も経済的な経路（新幹線・特急は指定席まで）<br>
           自家用車は走行距離×設定の単価（高速代・駐車場代は実費）。宿泊は1泊の上限まで（超えるときは事前に代表の承認）<br>
           宿泊を伴う出張は、事前に代表の承認が必要です<br>
+          事前の承認は、申請の段階を「事前申請」にして出すと、アプリに記録が残ります。事前承認のあと、一覧の「精算する」から実際の金額で申請します<br>
           申請は翌月10日まで、振込は翌月15日です<br>
           アプリを使えない人は、チャットで事前連絡と領収書の写真を送り、代表が代わりに入力します（原本は月末に手渡し）<br>
           飲食：打合せの記録（いつ・誰と・何の打合せか）があれば会議費にできます。創業メンバーだけで、打合せの記録がない飲食は経費にしません<br>
@@ -224,6 +236,7 @@ details summary{cursor:pointer;color:var(--acc);font-size:14px}
     <section id="v-list" hidden>
       <div class="chips" id="chips">
         <button class="chip on" data-f="all">すべて</button>
+        <button class="chip" data-f="plan">事前申請</button>
         <button class="chip" data-f="pending">申請中</button>
         <button class="chip" data-f="approved">承認済</button>
         <button class="chip" data-f="paid">支払済</button>

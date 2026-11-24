@@ -25,7 +25,9 @@
     approved: ['承認済(未払)', 'b-a'],
     paid: ['支払済', 'b-ok'],
     rejected: ['差戻し', 'b-bad'],
-    withdrawn: ['取下げ', 'b-m']
+    withdrawn: ['取下げ', 'b-m'],
+    prePending: ['事前申請中', 'b-p'],   // 2026-11-24：事前申請の段階
+    preApproved: ['事前承認済', 'b-a']
   };
 
   // 領収書の表示名（Rules.gs の RECEIPTS_ と同じ）
@@ -354,6 +356,16 @@
   function formHints() {
     var trip = $('f_kind').value === 'trip';
     var car = !trip && $('f_car').checked;
+    // 事前申請：支払方法・領収書を隠し、未来の日付を許す（2026-11-24）
+    var plan = $('f_mode').value === 'plan';
+    $('planNote').hidden = !plan;
+    $('payBox').hidden = plan;
+    $('dateLabel').textContent = plan ? '予定日' : '領収書の日付';
+    $('amtLabel').textContent = plan ? '見込みの金額（税込・円）' : '金額（税込・円）';
+    ['f_date', 'f_from', 'f_to'].forEach(function (id) {
+      if (plan) $(id).removeAttribute('max'); else $(id).max = S.today || '';
+    });
+    if (!S.editing) $('btnSubmit').textContent = plan ? '事前申請する' : '申請する';
     $('tripBox').hidden = !trip;
     $('normalBox').hidden = trip;
     $('calcBox').hidden = !(trip || car);
@@ -376,7 +388,7 @@
       if (fa.other > 0) parts.push('実費 ' + yen(fa.other));
       $('calcSum').textContent = !fa.ok ? '数字を確かめてください（0以上の整数）。'
         : (fa.km > 0 && !fa.rate) ? '自家用車の単価が設定されていません。管理者に連絡してください。'
-          : '金額：' + yen(fa.amount) + (parts.length ? '（' + parts.join('＋') + '）' : '');
+          : (plan ? '見込みの金額：' : '金額：') + yen(fa.amount) + (parts.length ? '（' + parts.join('＋') + '）' : '');
       $('otherNote').textContent = car || trip ? '自家用車の単価は 1kmあたり ' + fa.rate + '円です（設定）。' : '';
     }
     var amt = fa.amount;
@@ -403,6 +415,8 @@
     $('preLabel').textContent = preWhy.join('・') + 'のため、支出前に代表の承認を得ている';
     $('wNotice').hidden = !(amt >= TH.notice && amt < TH.pre) || !$('wPre').hidden;
     $('wQuote').hidden = !(amt > TH.quote);
+    // 事前申請では、事前承認・事前連絡はこれから受けるので、チェック欄を出さない
+    if (plan) { $('wPre').hidden = true; $('wNotice').hidden = true; }
 
     // 飲食の注意
     var t = $('f_memo').value + ' ' + (trip ? $('f_dest').value : $('f_payee').value);
@@ -453,6 +467,8 @@
     $('f_to').value = S.today || '';
     $('f_from').max = S.today || '';
     $('f_to').max = S.today || '';
+    $('f_mode').value = 'settle';
+    $('f_mode').disabled = false;
     $('f_kind').value = 'normal';
     $('f_kind').disabled = false;
     $('f_cat').selectedIndex = 0;
@@ -478,6 +494,9 @@
     var who = S.people.filter(function (p) { return p.name === e.applicantName; })[0];
     S.editing = { id: e.id, rev: e.rev, role: e.proxy ? (who ? who.role : '') : (S.me ? S.me.role : '') };
     S.files = (e.files || []).slice();
+    // 段階は修正では変えない（サーバーも今の行の段階で確かめる）
+    $('f_mode').value = e.phase === 'plan' ? 'plan' : 'settle';
+    $('f_mode').disabled = true;
     $('f_kind').value = trip ? 'trip' : 'normal';
     $('f_date').value = trip ? S.today : e.date;
     $('f_payee').value = trip ? '' : e.payee;
@@ -506,12 +525,32 @@
     if (e.proxy) $('f_applicant').value = e.applicantName;
     $('f_applicant').disabled = true;
     renderFiles();
-    $('formTitle').textContent = '修正して再申請（' + e.id + '）';
+    $('formTitle').textContent = (e.phase === 'plan' ? '事前申請を修正（' : '修正して再申請（') + e.id + '）';
     $('btnSubmit').textContent = '再申請する';
     $('btnCancelEdit').hidden = false;
     formHints();
     note($('formMsg'), '');
     showTab('new');
+  }
+
+  /**
+   * 一覧の「精算する」：事前承認済の申請の中身を申請欄に入れ、精算申請として開く。
+   * 日付は今日、支払方法と領収書は最初の選択肢に戻す。出張の日程は、今日より後なら今日にする。
+   */
+  function startSettle(e) {
+    startEdit(e);
+    S.editing.settle = true;
+    $('f_mode').value = 'settle';
+    $('f_date').value = S.today;
+    if ($('f_to').value > S.today) $('f_to').value = S.today;
+    if ($('f_from').value > $('f_to').value) $('f_from').value = $('f_to').value;
+    $('f_pay').selectedIndex = 0;
+    $('f_rc').value = 'paper';
+    $('f_pre').checked = false;    // 事前承認の記録はサーバーが付ける
+    $('f_notice').checked = false;
+    $('formTitle').textContent = '精算する（' + e.id + '）';
+    $('btnSubmit').textContent = '精算を申請する';
+    formHints();
   }
 
   /** 申請する／再申請する。入力の確かめはサーバーで行い、だめならその文面を出す */
@@ -539,7 +578,8 @@
       other: trip || car ? $('f_other').value : '',
       files: S.files,
       proxy: proxy,
-      applicantName: proxy ? $('f_applicant').value : ''
+      applicantName: proxy ? $('f_applicant').value : '',
+      plan: !S.editing && $('f_mode').value === 'plan'   // 新しい事前申請（修正・精算では段階はサーバーが決める）
     };
     if (trip) {
       value.dest = $('f_dest').value;
@@ -555,11 +595,15 @@
     note(msgEl, '保存しています…', 'i');
     var ed = S.editing;
     var p = ed
-      ? run('edit', { id: ed.id, rev: ed.rev, value: value })
+      ? run(ed.settle ? 'settle' : 'edit', { id: ed.id, rev: ed.rev, value: value })
       : run('create', { value: value });
     p.then(function (data) {
       resetForm();
-      if (ed) {
+      if (ed && ed.settle) {
+        note(msgEl, '精算を申請しました（' + ed.id + '）。領収書の裏面に申請番号を書いておくと、あとで照合しやすくなります。', 'o');
+      } else if (value.plan) {
+        note(msgEl, '事前申請しました（申請番号 ' + data.id + '）。代表の事前承認のあと、支出が済んだら一覧の「精算する」から実際の金額で申請してください。', 'o');
+      } else if (ed) {
         note(msgEl, '修正して再申請しました（' + ed.id + '）。', 'o');
       } else {
         note(msgEl, '申請しました（申請番号 ' + data.id + '）。' + (proxy ? '代理入力：' + value.applicantName + ' さんの申請です。' : '') +
@@ -667,22 +711,29 @@
    *   支払済・承認取消 … 承認者、承認済のとき
    *   修正・取下げ … 申請した本人か代理で入力した人、申請中か差戻しのとき
    *   確認 … 確認者（承認者・申請者本人を除く）、確認が要る申請中のもの
-   *   原本受領・受領取消 … 承認者、領収書が「原本あり」で取下げ以外
+   *   原本受領・受領取消 … 承認者、領収書が「原本あり」で取下げ以外（事前申請の段階は除く）
+   * 事前申請の段階（e.phase＝plan）：
+   *   事前承認・差戻し … 承認者、事前申請中のとき
+   *   事前承認の取消 … 承認者、事前承認済のとき
+   *   精算する … 本人、事前承認済のとき（修正・取下げは、事前申請中・事前承認済・差戻しのとき）
    */
   function card(e) {
     var st = e.status, b = ST[st] || [st, 'b-m'], id = esc(e.id);
+    var plan = e.phase === 'plan';
+    if (st === 'rejected' && plan) b = ['差戻し（事前申請）', 'b-bad'];
     var waitCheck = e.needCheck && !e.checked;
     var act = '';
-    if (isChecker() && st === 'pending' && waitCheck && !e.mine) {
+    if (isChecker() && (st === 'pending' || st === 'prePending') && waitCheck && !e.mine) {
       act += '<div class="row"><button class="btn" data-act="confirm" data-id="' + id + '">取締役として確認する</button></div>';
     }
-    if (isApprover() && st === 'pending') {
+    if (isApprover() && (st === 'pending' || st === 'prePending')) {
+      var apLabel = plan ? '事前承認' : '承認';
       act += '<input id="n_' + id + '" maxlength="500" placeholder="差戻し理由（差し戻す場合のみ入力）" style="margin-top:10px">' +
-        '<div class="row">' + (waitCheck ? '<span class="mute">ほかの取締役の確認が済むと承認できます。</span>'
-          : '<button class="btn" data-act="approve" data-id="' + id + '">承認</button>') +
+        '<div class="row">' + (waitCheck ? '<span class="mute">ほかの取締役の確認が済むと' + apLabel + 'できます。</span>'
+          : '<button class="btn" data-act="approve" data-id="' + id + '">' + apLabel + '</button>') +
         '<button class="btn bad" data-act="reject" data-id="' + id + '">差戻し</button></div>';
     }
-    if (isApprover() && st !== 'withdrawn' && e.receipt === 'paper') {
+    if (isApprover() && st !== 'withdrawn' && !plan && e.receipt === 'paper') {
       act += e.origAt
         ? '<div class="row"><button class="btn ghost" data-act="unreceive" data-id="' + id + '">原本受領を取り消す</button></div>'
         : '<div class="row"><input id="o_' + id + '" type="date" value="' + esc(S.today) + '" style="max-width:180px">' +
@@ -694,16 +745,26 @@
         '<div class="row"><button class="btn" data-act="pay" data-id="' + id + '">支払済にする</button>' +
         '<button class="btn ghost" data-act="unapprove" data-id="' + id + '">承認を取り消す</button></div>';
     }
-    if (e.mine && (st === 'pending' || st === 'rejected')) {
-      act += '<div class="row"><button class="btn ghost" data-act="edit" data-id="' + id + '">修正して再申請</button>' +
+    if (isApprover() && st === 'preApproved') {
+      act += '<div class="row"><button class="btn ghost" data-act="unapprove" data-id="' + id + '">事前承認を取り消す</button></div>';
+    }
+    if (e.mine && st === 'preApproved') {
+      act += '<div class="row"><button class="btn" data-act="settle" data-id="' + id + '">精算する</button>' +
+        '<button class="btn ghost" data-act="edit" data-id="' + id + '">修正</button>' +
+        '<button class="btn bad" data-act="withdraw" data-id="' + id + '">取り下げ</button></div>';
+    }
+    if (e.mine && (st === 'pending' || st === 'rejected' || st === 'prePending')) {
+      act += '<div class="row"><button class="btn ghost" data-act="edit" data-id="' + id + '">' + (plan ? '修正' : '修正して再申請') + '</button>' +
         '<button class="btn bad" data-act="withdraw" data-id="' + id + '">取り下げ</button></div>';
     }
     var extra = '';
     if (st === 'rejected' && e.note) extra = '<div class="note b">差戻し理由：' + esc(e.note) + '</div>';
     if (st === 'approved') extra = '<div class="meta" style="margin-top:6px">承認：' + esc(e.apBy) + '（' + esc(dstr(e.apAt)) + '）</div>';
+    if (st === 'preApproved') extra = '<div class="meta" style="margin-top:6px">事前承認：' + esc(e.apBy) + '（' + esc(dstr(e.apAt)) + '）。支出が済んだら「精算する」から申請してください。</div>';
     if (st === 'paid') extra = '<div class="note o">' + esc(e.paidDate) + ' 支払済' + (e.ref ? '（' + esc(e.ref) + '）' : '') + '</div>';
     var flags = (e.flags || []).map(function (f) { return '<span class="flag">⚠ ' + esc(f) + '</span>'; }).join('');
-    var tags = (e.kind === 'trip' ? '<span class="tag">出張・研修</span>' : '') +
+    var tags = (plan ? '<span class="tag">事前申請（見込み）</span>' : '') +
+      (e.kind === 'trip' ? '<span class="tag">出張・研修</span>' : '') +
       (e.proxy ? '<span class="tag">代理入力（入力：' + esc(e.enteredByName) + '）</span>' : '') +
       (e.related ? '<span class="tag">関係者との取引</span>' : '');
     var info = detailText(e).map(function (t) { return '<div class="meta">' + esc(t) + '</div>'; }).join('');
@@ -714,7 +775,8 @@
       '<div class="h"><div><div class="no">' + id + ' ・ ' + esc(e.date) + (e.rev > 1 ? ' ・ 修正' + (e.rev - 1) + '回' : '') + '</div>' +
       '<div class="pay">' + esc(e.payee) + '</div></div><div class="amt">' + yen(e.amount) + '</div></div>' +
       (tags ? '<div style="margin-top:4px">' + tags + '</div>' : '') +
-      '<div class="meta">' + esc(e.cat) + ' ・ 申請者 ' + esc(e.applicantName) + ' ・ ' + esc(e.pay) + ' ・ 領収書 ' + esc(RC[e.receipt] || e.receipt) + '</div>' +
+      '<div class="meta">' + esc(e.cat) + ' ・ 申請者 ' + esc(e.applicantName) +
+        (plan ? '' : ' ・ ' + esc(e.pay) + ' ・ 領収書 ' + esc(RC[e.receipt] || e.receipt)) + '</div>' +
       info +
       '<div class="memo">' + esc(e.memo) + '</div>' +
       (files ? '<div>' + files + '</div>' : '') +
@@ -737,6 +799,7 @@
     if (calc.length) t.push(calc.join(' ＋ '));
     if (e.needCheck) t.push(e.checked ? '取締役の確認：' + e.checkBy + '（' + dstr(e.checkAt) + '）' : '取締役の確認：未');
     if (e.origAt) t.push('原本受領：' + e.origAt + '（' + e.origBy + '）');
+    if (e.preAt) t.push('事前承認：' + dstr(e.preAt) + '・' + e.preBy + '・' + yen(e.preAmount));
     return t;
   }
 
@@ -746,7 +809,8 @@
       if (app && e.applicantName !== app) return false;
       if (S.filter === 'all') return true;
       // 確認待ち・原本未受領は、状態ではなく注意印で絞る
-      if (S.filter === 'check') return e.status === 'pending' && e.needCheck && !e.checked;
+      if (S.filter === 'check') return (e.status === 'pending' || e.status === 'prePending') && e.needCheck && !e.checked;
+      if (S.filter === 'plan') return e.status === 'prePending' || e.status === 'preApproved';
       if (S.filter === 'orig') return (e.flags || []).indexOf('原本未受領') >= 0;
       return e.status === S.filter;
     });
@@ -878,9 +942,14 @@
       '状態', '承認日', '承認者', '支払日', '振込メモ', '差戻し理由', '申請日',
       // 2026-11-19 追加（経費・旅費規程）
       '種類', '行き先', '目的', '日程（開始）', '日程（終了）', '宿泊', '泊数', '宿泊費', '走行距離(km)', '単価(円/km)', 'その他の実費',
-      '事前連絡', '関係者取引', '代理入力', '入力者', '確認者', '確認日', '原本受領日', '添付数'];
+      '事前連絡', '関係者取引', '代理入力', '入力者', '確認者', '確認日', '原本受領日', '添付数',
+      // 2026-11-24 追加（事前申請）
+      '事前承認者', '事前承認日', '事前承認の金額'];
     var lines = [head.map(csvCell).join(',')];
-    S.expenses.slice().sort(function (a, b) { return a.seq - b.seq; }).forEach(function (e) {
+    // 事前申請の段階の行（事前申請中・事前承認済）は、まだ経費ではないので台帳に出さない。
+    // 事前承認の3列（preBy・preAt・preAmount）は、精算に進んだとき（settle）に写される列なので、
+    // 精算の段階の行にだけ値が入る（事前申請の段階の行では空）
+    S.expenses.filter(function (e) { return e.phase !== 'plan'; }).sort(function (a, b) { return a.seq - b.seq; }).forEach(function (e) {
       var s = e.status, ok = (s === 'approved' || s === 'paid'), trip = e.kind === 'trip';
       lines.push([e.id, e.rev, e.applicantName, e.date, e.payee, e.cat, e.memo, e.amount, e.pay, RC[e.receipt] || e.receipt,
         e.pre ? 'あり' : '', e.quote ? 'あり' : '', ST[s][0],
@@ -890,7 +959,8 @@
         e.stay ? 'あり' : '', e.stay ? e.nights : '', e.stay ? e.hotel : '',
         Number(e.km) > 0 ? e.km : '', Number(e.km) > 0 ? e.mileRate : '', Number(e.other) > 0 ? e.other : '',
         e.notice ? 'あり' : '', e.related ? 'あり' : '', e.proxy ? 'あり' : '', e.enteredByName || '',
-        e.checked ? e.checkBy : '', e.checked ? dstr(e.checkAt) : '', e.origAt || '', (e.files || []).length
+        e.checked ? e.checkBy : '', e.checked ? dstr(e.checkAt) : '', e.origAt || '', (e.files || []).length,
+        e.preBy || '', e.preAt ? dstr(e.preAt) : '', (e.preAmount === '' || e.preAmount == null) ? '' : e.preAmount
       ].map(csvCell).join(','));
     });
     return '﻿' + lines.join('\r\n');
@@ -1023,7 +1093,7 @@
       if (!armed(b)) return;
       act('unreceive', { id: e.id, rev: e.rev }, e.id + ' の原本受領を取り消しました。');
     } else if (a === 'approve') {
-      act('approve', { id: e.id, rev: e.rev }, e.id + ' を承認しました。');
+      act('approve', { id: e.id, rev: e.rev }, e.id + (e.phase === 'plan' ? ' を事前承認しました。' : ' を承認しました。'));
     } else if (a === 'reject') {
       var n = val('n_' + e.id);
       if (!n) { banner('差戻し理由を入力してください。', 'w'); return; }
@@ -1040,6 +1110,8 @@
       act('withdraw', { id: e.id, rev: e.rev }, e.id + ' を取り下げました。');
     } else if (a === 'edit') {
       startEdit(e);
+    } else if (a === 'settle') {
+      startSettle(e);
     }
   }
 
@@ -1063,7 +1135,7 @@
     ['d_app', 'd_st', 'd_from', 'd_to'].forEach(function (id) { $(id).addEventListener('change', renderDoc); });
 
     ['f_amt', 'f_memo', 'f_payee', 'f_dest', 'f_km', 'f_other', 'f_nights', 'f_hotel'].forEach(function (id) { $(id).addEventListener('input', formHints); });
-    ['f_kind', 'f_stay', 'f_car', 'f_proxy', 'f_applicant', 'f_related'].forEach(function (id) { $(id).addEventListener('change', formHints); });
+    ['f_mode', 'f_kind', 'f_stay', 'f_car', 'f_proxy', 'f_applicant', 'f_related'].forEach(function (id) { $(id).addEventListener('change', formHints); });
     $('f_file').addEventListener('change', uploadFile);
     $('fileList').addEventListener('click', function (ev) {
       var b = ev.target.closest('button[data-fdel]');
