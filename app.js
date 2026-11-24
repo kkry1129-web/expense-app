@@ -541,6 +541,7 @@
     startEdit(e);
     S.editing.settle = true;
     $('f_mode').value = 'settle';
+    $('f_kind').disabled = true;   // 種類は事前申請のまま（サーバーでも確かめる）
     $('f_date').value = S.today;
     if ($('f_to').value > S.today) $('f_to').value = S.today;
     if ($('f_from').value > $('f_to').value) $('f_from').value = $('f_to').value;
